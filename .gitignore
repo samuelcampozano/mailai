@@ -1,0 +1,13 @@
+# Secrets & environment files — never commit
+.env
+.env.*
+!.env.example
+
+# Go build artifacts
+*.exe
+*.test
+*.out
+
+# Editors / OS
+.DS_Store
+Thumbs.db
