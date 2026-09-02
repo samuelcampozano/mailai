@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/emersion/go-imap"
 	imapclient "github.com/emersion/go-imap/client"
@@ -69,6 +70,54 @@ func (c *Client) fetch(ctx context.Context, n int) ([]Email, error) {
 	}
 	seqset.AddRange(start, mbox.Messages)
 
+	return c.fetchSeqSet(conn, seqset, time.Time{})
+}
+
+// fetchSince fetches the messages whose date is at or after since, newest
+// first, up to max messages (max <= 0 means no cap beyond the mailbox size).
+// A zero since means no date restriction (the whole mailbox).
+func (c *Client) fetchSince(ctx context.Context, since time.Time, max int) ([]Email, error) {
+	conn, err := c.dial()
+	if err != nil {
+		return nil, fmt.Errorf("mailai: dial: %w", err)
+	}
+	defer conn.Logout()
+
+	if err := conn.Login(c.imap.Username, c.imap.Password); err != nil {
+		return nil, fmt.Errorf("mailai: login: %w", err)
+	}
+
+	// readOnly=true: the server rejects any attempt to modify flags.
+	if _, err := conn.Select(c.opts.Mailbox, true); err != nil {
+		return nil, fmt.Errorf("mailai: select %q: %w", c.opts.Mailbox, err)
+	}
+
+	criteria := imap.NewSearchCriteria()
+	if !since.IsZero() {
+		criteria.Since = since
+	}
+	seqs, err := conn.Search(criteria)
+	if err != nil {
+		return nil, fmt.Errorf("mailai: search: %w", err)
+	}
+	if len(seqs) == 0 {
+		return nil, nil
+	}
+
+	// Sequence numbers come ascending; keep the newest ones.
+	if max > 0 && len(seqs) > max {
+		seqs = seqs[len(seqs)-max:]
+	}
+	seqset := new(imap.SeqSet)
+	seqset.AddNum(seqs...)
+
+	return c.fetchSeqSet(conn, seqset, since)
+}
+
+// fetchSeqSet fetches and parses the messages in seqset. When minDate is not
+// zero, messages dated before it are dropped (client-side double check on top
+// of the server-side SINCE search, which is day-granular).
+func (c *Client) fetchSeqSet(conn *imapclient.Client, seqset *imap.SeqSet, minDate time.Time) ([]Email, error) {
 	// Peek=true: fetch the body WITHOUT setting the \Seen flag.
 	section := &imap.BodySectionName{Peek: true}
 	items := []imap.FetchItem{imap.FetchEnvelope, imap.FetchUid, section.FetchItem()}
@@ -79,6 +128,9 @@ func (c *Client) fetch(ctx context.Context, n int) ([]Email, error) {
 
 	var out []Email
 	for msg := range messages {
+		if !minDate.IsZero() && msg.Envelope.Date.Before(minDate) {
+			continue
+		}
 		from := ""
 		if len(msg.Envelope.From) > 0 {
 			from = msg.Envelope.From[0].Address()

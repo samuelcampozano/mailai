@@ -7,6 +7,12 @@ import (
 	"github.com/ledongthuc/pdf"
 )
 
+// PDFText extracts plain text from PDF bytes. It returns an empty string
+// when the PDF has no extractable text layer (e.g. scanned documents).
+func PDFText(data []byte) string {
+	return pdfToText(data)
+}
+
 // pdfToText extracts plain text from PDF bytes. It returns an empty string
 // when the PDF has no extractable text layer (e.g. scanned documents).
 func pdfToText(data []byte) string {

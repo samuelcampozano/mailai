@@ -48,6 +48,8 @@ is no write path in the library.
 ## Features
 
 - Read recent emails (newest first) or the whole mailbox
+- **Date-range fetching** (`FetchSince`) for "today / this week / this month" scopes
+- **Multi-turn chat** (`Chat`) over the fetched emails, with vision support
 - Extracts plain-text bodies (prefers `text/plain`, falls back to
   `text/html` converted to text)
 - Decodes quoted-printable / base64 transfer encodings and RFC 2047 headers
@@ -81,6 +83,7 @@ import (
     "fmt"
     "log"
     "os"
+    "time"
 
     "github.com/samuelcampozano/mailai"
 )
@@ -106,6 +109,18 @@ func main() {
         log.Fatal(err)
     }
     fmt.Println(digest.Summary)
+
+    // Chat over the last month of email (multi-turn, images supported).
+    emails, err := c.FetchSince(context.Background(), time.Now().AddDate(0, 0, -30), 300)
+    if err != nil {
+        log.Fatal(err)
+    }
+    reply, err := c.Chat(context.Background(), []mailai.ChatMessage{
+        {Role: "system", Content: "Eres un asistente de correo. Responde en español."},
+        {Role: "user", Content: "Ordena los correos por prioridad y dime qué requiere mi acción."},
+    })
+    fmt.Println(reply)
+    _ = emails
 
     // Or fetch first, then summarize with your own prompt.
     emails, err := c.FetchRecent(context.Background(), 10)

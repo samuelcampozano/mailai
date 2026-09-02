@@ -146,3 +146,67 @@ func TestSummarizeEmpty(t *testing.T) {
 		t.Fatal("expected error for empty email list")
 	}
 }
+
+func TestChatVision(t *testing.T) {
+	var gotModel string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body json.RawMessage
+		json.NewDecoder(r.Body).Decode(&body)
+		gotModel, _ = decodeRequest(t, []byte(body))
+		w.Write([]byte(`{"choices":[{"message":{"content":"vision chat reply"}}]}`))
+	}))
+	defer srv.Close()
+
+	c := New(Options{AI: AIConfig{
+		BaseURL:     srv.URL,
+		APIKey:      "test-key",
+		Model:       "text-model",
+		VisionModel: "vision-model",
+	}})
+
+	reply, err := c.Chat(context.Background(), []ChatMessage{
+		{Role: "system", Content: "Eres un asistente."},
+		{Role: "user", Content: "¿Qué hay en esta imagen?", Images: []Attachment{{Name: "x.png", MimeType: "image/png", Data: []byte("fakepng")}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reply != "vision chat reply" {
+		t.Errorf("reply = %q", reply)
+	}
+	if gotModel != "vision-model" {
+		t.Errorf("model = %q, want vision-model", gotModel)
+	}
+}
+
+func TestChatTextOnlyAndDefaultSystem(t *testing.T) {
+	var gotMessages int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body json.RawMessage
+		json.NewDecoder(r.Body).Decode(&body)
+		var req chatRequest
+		json.Unmarshal(body, &req)
+		gotMessages = len(req.Messages)
+		if req.Messages[0].Role != "system" {
+			t.Errorf("first message role = %q, want system", req.Messages[0].Role)
+		}
+		w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer srv.Close()
+
+	c := New(Options{AI: AIConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}})
+	reply, err := c.Chat(context.Background(), []ChatMessage{
+		{Role: "user", Content: "hola"},
+		{Role: "assistant", Content: "buenas"},
+		{Role: "user", Content: "resume"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reply != "ok" {
+		t.Errorf("reply = %q", reply)
+	}
+	if gotMessages != 4 { // default system + 3 turns
+		t.Errorf("messages = %d, want 4", gotMessages)
+	}
+}

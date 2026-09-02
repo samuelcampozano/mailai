@@ -160,7 +160,25 @@ func testAddrs(s string) []*imap.Address {
 	return out
 }
 
-func (m *testMailbox) SearchMessages(bool, *imap.SearchCriteria) ([]uint32, error) { return nil, nil }
+func (m *testMailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uint32, error) {
+	var out []uint32
+	for i, tm := range m.messages {
+		msg, err := mail.ReadMessage(bytes.NewReader(tm.raw))
+		if err != nil {
+			continue
+		}
+		d, _ := mail.ParseDate(msg.Header.Get("Date"))
+		if !criteria.Since.IsZero() && d.Before(criteria.Since) {
+			continue
+		}
+		if uid {
+			out = append(out, tm.uid)
+		} else {
+			out = append(out, uint32(i+1))
+		}
+	}
+	return out, nil
+}
 func (m *testMailbox) CreateMessage(flags []string, date time.Time, body imap.Literal) error {
 	data, _ := io.ReadAll(body)
 	m.messages = append(m.messages, &testMessage{uid: uint32(len(m.messages)) + 1, raw: data, flags: flags})
@@ -284,5 +302,51 @@ func TestFetchRecentMissingIMAPConfig(t *testing.T) {
 	c := New(Options{})
 	if _, err := c.FetchRecent(context.Background(), 10); err == nil {
 		t.Fatal("expected config error")
+	}
+}
+
+func rawEmailWithDate(date string) []byte {
+	return []byte("From: sender@example.com\r\n" +
+		"To: receiver@example.com\r\n" +
+		"Subject: Test email\r\n" +
+		"Date: " + date + "\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: text/plain; charset=utf-8\r\n" +
+		"\r\n" +
+		"Body.")
+}
+
+func TestFetchSince(t *testing.T) {
+	addr, _ := startIMAPServer(t,
+		&testMessage{uid: 1, raw: rawEmailWithDate("Tue, 25 Aug 2026 10:00:00 +0000")},
+		&testMessage{uid: 2, raw: rawEmailWithDate("Sun, 30 Aug 2026 10:00:00 +0000")},
+		&testMessage{uid: 3, raw: rawEmailWithDate("Tue, 01 Sep 2026 10:00:00 +0000")},
+	)
+
+	forcePlaintext = true
+	t.Cleanup(func() { forcePlaintext = false })
+
+	c := New(Options{IMAP: IMAPConfig{Host: addr, Username: "user", Password: "pass"}})
+
+	since := time.Date(2026, 8, 29, 0, 0, 0, 0, time.UTC)
+	emails, err := c.FetchSince(context.Background(), since, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(emails) != 2 {
+		t.Fatalf("got %d emails, want 2", len(emails))
+	}
+	// Newest first.
+	if emails[0].UID != 3 || emails[1].UID != 2 {
+		t.Errorf("unexpected order: %d, %d", emails[0].UID, emails[1].UID)
+	}
+
+	// Whole mailbox with a cap.
+	all, err := c.FetchSince(context.Background(), time.Time{}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 || all[0].UID != 3 || all[1].UID != 2 {
+		t.Errorf("whole-mailbox fetch with cap: got %d, uids %d,%d", len(all), all[0].UID, all[1].UID)
 	}
 }

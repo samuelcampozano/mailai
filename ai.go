@@ -43,18 +43,23 @@ type chatResponse struct {
 	} `json:"choices"`
 }
 
-// chat performs one chat-completion request against the OpenAI-compatible
-// endpoint {BaseURL}/chat/completions.
-func (c *Client) chat(ctx context.Context, model, system string, user any) (string, error) {
+// ChatMessage is a single turn of a multi-turn conversation.
+type ChatMessage struct {
+	// Role is "system", "user" or "assistant".
+	Role string
+	// Content is the text of the turn.
+	Content string
+	// Images, when set on a user turn, are sent to the vision model as
+	// inline base64 data URLs.
+	Images []Attachment
+}
+
+// chatMessages performs one chat-completion request against the
+// OpenAI-compatible endpoint {BaseURL}/chat/completions.
+func (c *Client) chatMessages(ctx context.Context, model string, msgs []chatMessage) (string, error) {
 	endpoint := strings.TrimRight(c.ai.BaseURL, "/") + "/chat/completions"
 
-	payload := chatRequest{
-		Model: model,
-		Messages: []chatMessage{
-			{Role: "system", Content: system},
-			{Role: "user", Content: user},
-		},
-	}
+	payload := chatRequest{Model: model, Messages: msgs}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("mailai: marshal request: %w", err)
@@ -93,6 +98,78 @@ func (c *Client) chat(ctx context.Context, model, system string, user any) (stri
 		return "", fmt.Errorf("mailai: no choices in response: %s", truncate(string(respBody), 300))
 	}
 	return cr.Choices[0].Message.Content, nil
+}
+
+// chat performs a single-turn request with a system prompt and user content.
+func (c *Client) chat(ctx context.Context, model, system string, user any) (string, error) {
+	msgs := []chatMessage{
+		{Role: "system", Content: system},
+		{Role: "user", Content: user},
+	}
+	return c.chatMessages(ctx, model, msgs)
+}
+
+// Chat sends a multi-turn conversation to the model and returns its reply.
+// When history contains no system message, the configured system prompt is
+// prepended. User turns with Images are sent to the vision model (inline
+// base64); if the model rejects image input, Chat retries text-only.
+func (c *Client) Chat(ctx context.Context, history []ChatMessage) (string, error) {
+	if err := c.validateAI(); err != nil {
+		return "", err
+	}
+	if len(history) == 0 {
+		return "", fmt.Errorf("mailai: chat history is empty")
+	}
+
+	hasImages := false
+	hasSystem := false
+	for _, h := range history {
+		if strings.EqualFold(h.Role, "system") {
+			hasSystem = true
+		}
+		if len(h.Images) > 0 && strings.EqualFold(h.Role, "user") {
+			hasImages = true
+		}
+	}
+
+	build := func(withImages bool) []chatMessage {
+		msgs := make([]chatMessage, 0, len(history)+1)
+		if !hasSystem {
+			msgs = append(msgs, chatMessage{Role: "system", Content: c.systemPrompt()})
+		}
+		for _, h := range history {
+			var content any = h.Content
+			if withImages && len(h.Images) > 0 && strings.EqualFold(h.Role, "user") {
+				parts := []chatPart{{Type: "text", Text: h.Content}}
+				for _, img := range h.Images {
+					if !isSupportedImage(img.MimeType) {
+						continue
+					}
+					parts = append(parts, chatPart{
+						Type:     "image_url",
+						ImageURL: &imageURL{URL: "data:" + img.MimeType + ";base64," + base64.StdEncoding.EncodeToString(img.Data)},
+					})
+				}
+				if len(parts) > 1 {
+					content = parts
+				}
+			}
+			msgs = append(msgs, chatMessage{Role: h.Role, Content: content})
+		}
+		return msgs
+	}
+
+	model := c.ai.Model
+	if hasImages && c.ai.VisionModel != "" {
+		model = c.ai.VisionModel
+	}
+
+	reply, err := c.chatMessages(ctx, model, build(true))
+	if err != nil && hasImages && strings.Contains(strings.ToLower(err.Error()), "image") {
+		// The model does not accept image input; retry text-only.
+		reply, err = c.chatMessages(ctx, c.ai.Model, build(false))
+	}
+	return reply, err
 }
 
 // summarize builds the prompt from the emails (plus extracted PDF text and

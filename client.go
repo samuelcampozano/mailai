@@ -172,6 +172,17 @@ func (c *Client) FetchRecent(ctx context.Context, n int) ([]Email, error) {
 	return c.fetch(ctx, n)
 }
 
+// FetchSince fetches the messages dated at or after since, newest first, up
+// to max messages (max <= 0 means no cap beyond the mailbox size). A zero
+// since returns the whole mailbox. Like every read in this package, it never
+// changes message flags.
+func (c *Client) FetchSince(ctx context.Context, since time.Time, max int) ([]Email, error) {
+	if err := c.validateIMAP(); err != nil {
+		return nil, err
+	}
+	return c.fetchSince(ctx, since, max)
+}
+
 // Summarize sends the given emails to the LLM. PDF text and images are
 // included according to the options; the vision model is used automatically
 // when images are present and a VisionModel is configured.
