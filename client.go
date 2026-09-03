@@ -45,6 +45,11 @@ type AIConfig struct {
 	VisionModel string
 	// SystemPrompt overrides the default summarization instructions.
 	SystemPrompt string
+	// Temperature controls sampling randomness. 0 means "use the API
+	// default" (1.0 for DeepSeek). DeepSeek recommends 1.3 for general
+	// conversation:
+	// https://api-docs.deepseek.com/quick_start/parameter_settings
+	Temperature float64
 	// HTTPClient is the client used for API calls. If nil, a client with
 	// a 3-minute timeout is used.
 	HTTPClient *http.Client

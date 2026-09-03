@@ -31,8 +31,9 @@ type imageURL struct {
 }
 
 type chatRequest struct {
-	Model    string        `json:"model"`
-	Messages []chatMessage `json:"messages"`
+	Model       string        `json:"model"`
+	Messages    []chatMessage `json:"messages"`
+	Temperature float64       `json:"temperature,omitempty"`
 }
 
 type chatResponse struct {
@@ -59,7 +60,7 @@ type ChatMessage struct {
 func (c *Client) chatMessages(ctx context.Context, model string, msgs []chatMessage) (string, error) {
 	endpoint := strings.TrimRight(c.ai.BaseURL, "/") + "/chat/completions"
 
-	payload := chatRequest{Model: model, Messages: msgs}
+	payload := chatRequest{Model: model, Messages: msgs, Temperature: c.ai.Temperature}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("mailai: marshal request: %w", err)

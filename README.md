@@ -140,6 +140,7 @@ func main() {
 | `Options.DisablePDFs` | `false` | Turn off PDF text extraction |
 | `Options.DisableImages` | `false` | Turn off image analysis |
 | `AIConfig.SystemPrompt` | built-in | Custom instructions for the model |
+| `AIConfig.Temperature` | `0` (API default) | Sampling randomness; DeepSeek recommends `1.3` for general conversation |
 | `AIConfig.HTTPClient` | 3-min timeout | Custom HTTP client |
 | `IMAPConfig.InsecureSkipVerify` | `false` | Allow self-signed certificates |
 

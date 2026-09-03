@@ -210,3 +210,36 @@ func TestChatTextOnlyAndDefaultSystem(t *testing.T) {
 		t.Errorf("messages = %d, want 4", gotMessages)
 	}
 }
+
+func TestTemperatureSent(t *testing.T) {
+	var gotTemp float64
+	var gotRaw string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body json.RawMessage
+		json.NewDecoder(r.Body).Decode(&body)
+		gotRaw = string(body)
+		var req chatRequest
+		json.Unmarshal(body, &req)
+		gotTemp = req.Temperature
+		w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer srv.Close()
+
+	// 1.3 (recomendado por DeepSeek para conversación general).
+	c := New(Options{AI: AIConfig{BaseURL: srv.URL, APIKey: "k", Model: "m", Temperature: 1.3}})
+	if _, err := c.Chat(context.Background(), []ChatMessage{{Role: "user", Content: "hola"}}); err != nil {
+		t.Fatal(err)
+	}
+	if gotTemp != 1.3 {
+		t.Errorf("temperature = %v, want 1.3", gotTemp)
+	}
+
+	// 0 = no enviar el campo (usa el valor por defecto de la API).
+	c2 := New(Options{AI: AIConfig{BaseURL: srv.URL, APIKey: "k", Model: "m"}})
+	if _, err := c2.Chat(context.Background(), []ChatMessage{{Role: "user", Content: "hola"}}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(gotRaw, "temperature") {
+		t.Errorf("temperature debería omitirse cuando es 0; raw=%s", gotRaw)
+	}
+}
